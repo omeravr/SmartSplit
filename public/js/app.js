@@ -34,11 +34,20 @@ function loadData() {
     }
 }
 
-// Save data to localStorage
+// Save data to localStorage and Firebase if a group is active
 function saveData() {
     localStorage.setItem('smartsplit_members', JSON.stringify(state.members));
     localStorage.setItem('smartsplit_expenses', JSON.stringify(state.expenses));
     localStorage.setItem('smartsplit_settlements', JSON.stringify(state.settlements));
+    
+    // If Firebase is available and a group is active, save to Firebase
+    if (window.firebaseDataSync && window.firebaseGroupManager.getCurrentGroup()) {
+        window.firebaseDataSync.saveToFirebase(state)
+            .catch(error => {
+                console.error("Failed to save to Firebase:", error);
+                showToast("Failed to sync with cloud. Changes saved locally only.", "warning");
+            });
+    }
 }
 
 // Tab Navigation
@@ -73,10 +82,11 @@ function showTab(tabId) {
 }
 
 // Initialize the application
-function init() {
+async function init() {
     loadData();
     setupEventListeners();
     setupSyncEventListeners();
+    setupFirebaseSync();
     showTab('dashboard');
     
     // Set current date for expense and settlement forms
@@ -94,6 +104,13 @@ function init() {
         toastContainer.className = 'toast-container';
         document.body.appendChild(toastContainer);
     }
+    
+    // Check for group in URL (for shared links)
+    const urlParams = new URLSearchParams(window.location.search);
+    const groupCode = urlParams.get('group');
+    if (groupCode) {
+        joinGroup(groupCode);
+    }
 }
 
 // Setup event listeners
@@ -102,20 +119,26 @@ function setupEventListeners() {
     document.getElementById('save-member-btn').addEventListener('click', () => {
         const nameInput = document.getElementById('member-name');
         const emailInput = document.getElementById('member-email');
+        const phoneInput = document.getElementById('member-phone');
         
         if (!nameInput.value.trim()) {
             alert('Please enter a name for the member');
             return;
         }
         
-        addMember(nameInput.value.trim(), emailInput.value.trim());
+        addMember(nameInput.value.trim(), emailInput.value.trim(), phoneInput?.value?.trim());
         
         nameInput.value = '';
         emailInput.value = '';
+        if (phoneInput) phoneInput.value = '';
         
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('add-member-modal'));
+        // Close modal - Fixed version
+        const modalElement = document.getElementById('add-member-modal');
+        const modal = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
         modal.hide();
+        
+        // Show success notification
+        showToast('Member added successfully', 'success');
     });
     
     // Update member button
@@ -237,11 +260,12 @@ function setupEventListeners() {
 }
 
 // Add a new member
-function addMember(name, email = '') {
+function addMember(name, email = '', phone = '') {
     const newMember = {
         id: state.nextMemberId++,
         name,
         email,
+        phone,
         createdAt: new Date().toISOString()
     };
     
@@ -841,8 +865,157 @@ function importSyncCode(syncCode) {
     }
 }
 
-// Setup event listeners for syncing
+// Setup Firebase data sync
+let firebaseListener = null;
+async function setupFirebaseSync() {
+    if (!window.firebaseDataSync) return;
+    
+    const groupId = window.firebaseGroupManager.getCurrentGroup();
+    if (!groupId) return;
+    
+    try {
+        // Load initial data from Firebase
+        const firebaseData = await window.firebaseDataSync.loadFromFirebase();
+        if (firebaseData) {
+            mergeData(firebaseData);
+        }
+        
+        // Set up real-time listener
+        if (firebaseListener) {
+            window.firebaseDataSync.stopListening(firebaseListener);
+        }
+        
+        firebaseListener = window.firebaseDataSync.listenForUpdates((data) => {
+            if (data && data.lastUpdated) {
+                // Only update if the data is newer than our last saved timestamp
+                const lastLocalUpdate = localStorage.getItem('smartsplit_last_update') || 0;
+                if (!lastLocalUpdate || data.lastUpdated > parseInt(lastLocalUpdate)) {
+                    mergeData(data);
+                    localStorage.setItem('smartsplit_last_update', data.lastUpdated);
+                }
+            }
+        });
+        
+        showToast("Connected to group data", "success");
+    } catch (error) {
+        console.error("Firebase sync error:", error);
+        showToast("Failed to connect to group data", "error");
+    }
+}
+
+// Merge remote data with local data
+function mergeData(remoteData) {
+    // If local data is empty, just use remote data
+    if (state.members.length === 0 && state.expenses.length === 0 && state.settlements.length === 0) {
+        state.members = remoteData.members || [];
+        state.expenses = remoteData.expenses || [];
+        state.settlements = remoteData.settlements || [];
+        state.nextMemberId = remoteData.nextMemberId || 1;
+        state.nextExpenseId = remoteData.nextExpenseId || 1;
+        state.nextSettlementId = remoteData.nextSettlementId || 1;
+    } else {
+        // Merge members
+        (remoteData.members || []).forEach(remoteMember => {
+            const existingMember = state.members.find(m => m.id === remoteMember.id);
+            if (!existingMember) {
+                state.members.push(remoteMember);
+            }
+        });
+        
+        // Merge expenses
+        (remoteData.expenses || []).forEach(remoteExpense => {
+            const existingExpense = state.expenses.find(e => e.id === remoteExpense.id);
+            if (!existingExpense) {
+                state.expenses.push(remoteExpense);
+            }
+        });
+        
+        // Merge settlements
+        (remoteData.settlements || []).forEach(remoteSettlement => {
+            const existingSettlement = state.settlements.find(s => s.id === remoteSettlement.id);
+            if (!existingSettlement) {
+                state.settlements.push(remoteSettlement);
+            }
+        });
+        
+        // Update counters
+        state.nextMemberId = Math.max(state.nextMemberId, remoteData.nextMemberId || 0);
+        state.nextExpenseId = Math.max(state.nextExpenseId, remoteData.nextExpenseId || 0);
+        state.nextSettlementId = Math.max(state.nextSettlementId, remoteData.nextSettlementId || 0);
+    }
+    
+    // Save the merged data locally
+    localStorage.setItem('smartsplit_members', JSON.stringify(state.members));
+    localStorage.setItem('smartsplit_expenses', JSON.stringify(state.expenses));
+    localStorage.setItem('smartsplit_settlements', JSON.stringify(state.settlements));
+    
+    // Refresh UI
+    renderDashboard();
+    renderMembers();
+}
+
+// Create a new group
+async function createGroup(groupName, creatorName) {
+    if (!window.firebaseGroupManager) {
+        showToast("Cloud sync is not available", "error");
+        return null;
+    }
+    
+    try {
+        const { groupId, accessCode } = await window.firebaseGroupManager.createGroup(groupName, creatorName);
+        window.firebaseGroupManager.setCurrentGroup(groupId);
+        
+        // Save current data to the new group
+        await window.firebaseDataSync.saveToFirebase(state);
+        
+        setupFirebaseSync();
+        
+        return { groupId, accessCode };
+    } catch (error) {
+        console.error("Error creating group:", error);
+        showToast("Failed to create group", "error");
+        return null;
+    }
+}
+
+// Join an existing group
+async function joinGroup(accessCode) {
+    if (!window.firebaseGroupManager) {
+        showToast("Cloud sync is not available", "error");
+        return false;
+    }
+    
+    try {
+        const groupId = await window.firebaseGroupManager.joinGroupWithCode(accessCode);
+        window.firebaseGroupManager.setCurrentGroup(groupId);
+        
+        setupFirebaseSync();
+        
+        showToast("Joined group successfully", "success");
+        return true;
+    } catch (error) {
+        console.error("Error joining group:", error);
+        showToast("Failed to join group: " + error.message, "error");
+        return false;
+    }
+}
+
+// Generate a sharing link for the current group
+function getGroupSharingLink() {
+    if (!window.firebaseGroupManager) return null;
+    
+    const groupId = window.firebaseGroupManager.getCurrentGroup();
+    if (!groupId) return null;
+    
+    // This would need a way to get access code from group ID
+    // For now, we'll just use the current URL with a parameter
+    const baseUrl = window.location.origin + window.location.pathname;
+    return `${baseUrl}?group=${accessCode}`;
+}
+
+// Update sync event listeners
 function setupSyncEventListeners() {
+    // Original sync code functions
     document.getElementById('sync-code').textContent = generateSyncCode();
     
     document.getElementById('import-btn').addEventListener('click', () => {
@@ -865,7 +1038,211 @@ function setupSyncEventListeners() {
     // Re-generate sync code when modal opens
     document.getElementById('sync-modal').addEventListener('show.bs.modal', () => {
         document.getElementById('sync-code').textContent = generateSyncCode();
+        
+        // Update Firebase group info if available
+        updateFirebaseGroupInfo();
     });
+    
+    // Add Firebase group creation/joining if available
+    if (window.firebaseGroupManager) {
+        // Add Firebase UI elements to sync modal
+        updateSyncModalWithFirebase();
+    }
+}
+
+// Update the sync modal to include Firebase group options
+function updateSyncModalWithFirebase() {
+    const modalBody = document.querySelector('#sync-modal .modal-body');
+    if (!modalBody) return;
+    
+    // Check if we already added Firebase UI
+    if (document.getElementById('firebase-group-section')) return;
+    
+    // Create the Firebase section
+    const firebaseSection = document.createElement('div');
+    firebaseSection.id = 'firebase-group-section';
+    firebaseSection.innerHTML = `
+        <hr>
+        <h5 class="mb-3">Cloud Sync (Realtime)</h5>
+        <div id="group-status">
+            <p id="group-status-text">You are not connected to any group.</p>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col">
+                <button class="btn btn-primary w-100" id="create-group-btn">Create Group</button>
+            </div>
+            <div class="col">
+                <button class="btn btn-outline-primary w-100" id="join-group-btn">Join Group</button>
+            </div>
+        </div>
+        <div id="create-group-form" class="d-none mb-3">
+            <div class="mb-3">
+                <label for="group-name" class="form-label">Group Name</label>
+                <input type="text" class="form-control" id="group-name" placeholder="e.g., Trip to Paris">
+            </div>
+            <div class="mb-3">
+                <label for="creator-name" class="form-label">Your Name</label>
+                <input type="text" class="form-control" id="creator-name" placeholder="Your name">
+            </div>
+            <div class="d-grid">
+                <button type="button" class="btn btn-primary" id="create-group-submit">Create</button>
+            </div>
+        </div>
+        <div id="join-group-form" class="d-none mb-3">
+            <div class="mb-3">
+                <label for="join-code" class="form-label">Join Code</label>
+                <input type="text" class="form-control" id="join-code" placeholder="Enter 6-character code">
+            </div>
+            <div class="d-grid">
+                <button type="button" class="btn btn-primary" id="join-group-submit">Join</button>
+            </div>
+        </div>
+        <div id="group-info" class="d-none">
+            <div class="alert alert-success mb-3">
+                <div class="d-flex align-items-center">
+                    <div>
+                        <strong>Group: <span id="group-name-display">-</span></strong>
+                        <div>Share this code with friends: <strong id="group-code-display">-</strong></div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-success ms-auto" id="copy-group-link">
+                        <i class="bi bi-clipboard"></i> Copy Link
+                    </button>
+                </div>
+            </div>
+            <div class="d-grid">
+                <button type="button" class="btn btn-outline-danger" id="leave-group-btn">Leave Group</button>
+            </div>
+        </div>
+    `;
+    
+    // Add the section to the modal
+    modalBody.appendChild(firebaseSection);
+    
+    // Add event listeners
+    document.getElementById('create-group-btn').addEventListener('click', () => {
+        document.getElementById('create-group-form').classList.remove('d-none');
+        document.getElementById('join-group-form').classList.add('d-none');
+    });
+    
+    document.getElementById('join-group-btn').addEventListener('click', () => {
+        document.getElementById('join-group-form').classList.remove('d-none');
+        document.getElementById('create-group-form').classList.add('d-none');
+    });
+    
+    document.getElementById('create-group-submit').addEventListener('click', async () => {
+        const groupName = document.getElementById('group-name').value.trim();
+        const creatorName = document.getElementById('creator-name').value.trim();
+        
+        if (!groupName || !creatorName) {
+            showToast('Please fill in all fields', 'warning');
+            return;
+        }
+        
+        const result = await createGroup(groupName, creatorName);
+        if (result) {
+            document.getElementById('create-group-form').classList.add('d-none');
+            updateFirebaseGroupInfo();
+        }
+    });
+    
+    document.getElementById('join-group-submit').addEventListener('click', async () => {
+        const joinCode = document.getElementById('join-code').value.trim();
+        
+        if (!joinCode) {
+            showToast('Please enter a join code', 'warning');
+            return;
+        }
+        
+        const success = await joinGroup(joinCode);
+        if (success) {
+            document.getElementById('join-group-form').classList.add('d-none');
+            updateFirebaseGroupInfo();
+        }
+    });
+    
+    document.getElementById('leave-group-btn').addEventListener('click', () => {
+        if (confirm('Are you sure you want to leave this group? Your data will remain in local storage.')) {
+            leaveGroup();
+        }
+    });
+    
+    document.getElementById('copy-group-link').addEventListener('click', () => {
+        const link = getGroupSharingLink();
+        if (link) {
+            navigator.clipboard.writeText(link).then(() => {
+                showToast('Link copied to clipboard', 'success');
+            });
+        }
+    });
+}
+
+// Update the Firebase group info in the sync modal
+function updateFirebaseGroupInfo() {
+    if (!window.firebaseGroupManager) return;
+    
+    const groupId = window.firebaseGroupManager.getCurrentGroup();
+    const groupStatus = document.getElementById('group-status');
+    const groupInfo = document.getElementById('group-info');
+    
+    if (!groupId) {
+        if (groupStatus) {
+            groupStatus.querySelector('#group-status-text').textContent = 'You are not connected to any group.';
+        }
+        if (groupInfo) {
+            groupInfo.classList.add('d-none');
+        }
+        return;
+    }
+    
+    // Get group info
+    database.ref(`groups/${groupId}`).get().then((snapshot) => {
+        if (snapshot.exists()) {
+            const groupData = snapshot.val();
+            
+            if (groupStatus) {
+                groupStatus.querySelector('#group-status-text').textContent = 'You are connected to a group.';
+            }
+            
+            if (groupInfo) {
+                groupInfo.classList.remove('d-none');
+                groupInfo.querySelector('#group-name-display').textContent = groupData.name || 'Unnamed Group';
+                
+                // Find the access code for this group
+                database.ref('accessCodes').orderByValue().equalTo(groupId).once('value', (snapshot) => {
+                    let accessCode = 'UNKNOWN';
+                    if (snapshot.exists()) {
+                        // Get the first key that matches this group ID
+                        const keys = Object.keys(snapshot.val());
+                        if (keys.length > 0) {
+                            accessCode = keys[0];
+                        }
+                    }
+                    groupInfo.querySelector('#group-code-display').textContent = accessCode;
+                });
+            }
+        }
+    }).catch((error) => {
+        console.error("Error getting group info:", error);
+    });
+}
+
+// Leave the current group
+function leaveGroup() {
+    if (!window.firebaseGroupManager) return;
+    
+    // Stop listening for updates
+    if (firebaseListener) {
+        window.firebaseDataSync.stopListening(firebaseListener);
+        firebaseListener = null;
+    }
+    
+    // Clear the current group
+    window.firebaseGroupManager.setCurrentGroup(null);
+    localStorage.removeItem('currentGroupId');
+    
+    // Update UI
+    updateFirebaseGroupInfo();
+    showToast('Left group successfully', 'success');
 }
 
 // Get expense form data
