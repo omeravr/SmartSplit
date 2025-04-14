@@ -1,14 +1,13 @@
 // Firebase configuration
 // Initialize Firebase
 const firebaseConfig = {
-  // You'll need to replace these values with your own Firebase project config
-  apiKey: "YOUR_API_KEY",
-  authDomain: "your-project.firebaseapp.com",
-  databaseURL: "https://your-project-default-rtdb.firebaseio.com",
-  projectId: "your-project",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyDCQCvEi1E60jjaWtUeE0gimU8MAHuc1sc",
+  authDomain: "smartsplit-4a161.firebaseapp.com",
+  databaseURL: "https://smartsplit-4a161-default-rtdb.firebaseio.com", // You'll need to create the Realtime Database
+  projectId: "smartsplit-4a161",
+  storageBucket: "smartsplit-4a161.firebasestorage.app",
+  messagingSenderId: "375875384038",
+  appId: "1:375875384038:web:956714afc63bc894cdc127"
 };
 
 // Initialize Firebase
