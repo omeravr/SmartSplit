@@ -9,7 +9,9 @@ const state = {
     nextMemberId: 1,
     nextExpenseId: 1,
     nextSettlementId: 1,
-    syncCode: null
+    syncCode: null,
+    groupId: null,
+    userName: null
 };
 
 // Load data from localStorage
@@ -41,11 +43,18 @@ function saveData() {
     localStorage.setItem('smartsplit_settlements', JSON.stringify(state.settlements));
     
     // If Firebase is available and a group is active, save to Firebase
-    if (window.firebaseDataSync && window.firebaseGroupManager.getCurrentGroup()) {
+    if (window.firebaseDataSync && state.groupId) {
+        // Update connection status while saving
+        updateConnectionStatus('connecting');
+        
         window.firebaseDataSync.saveToFirebase(state)
+            .then(() => {
+                updateConnectionStatus('connected');
+            })
             .catch(error => {
                 console.error("Failed to save to Firebase:", error);
                 showToast("Failed to sync with cloud. Changes saved locally only.", "warning");
+                updateConnectionStatus('error');
             });
     }
 }
@@ -83,10 +92,37 @@ function showTab(tabId) {
 
 // Initialize the application
 async function init() {
+    // Check if user is already part of a group
+    const savedGroupId = localStorage.getItem('currentGroupId');
+    const savedUserName = localStorage.getItem('userName');
+    
+    if (savedUserName) {
+        state.userName = savedUserName;
+    }
+    
+    // Load local data first
     loadData();
+    
+    // Setup all event listeners
     setupEventListeners();
     setupSyncEventListeners();
-    setupFirebaseSync();
+    
+    // If the user already has a group ID, connect to it automatically
+    if (savedGroupId && window.firebaseGroupManager) {
+        window.firebaseGroupManager.setCurrentGroup(savedGroupId);
+        state.groupId = savedGroupId;
+        setupFirebaseSync();
+    } else {
+        // First time user or no Firebase available
+        // Show a welcome modal to get started
+        setTimeout(() => {
+            if (!state.members.length) {
+                showWelcomeModal();
+            }
+        }, 1000);
+    }
+    
+    // Show the dashboard
     showTab('dashboard');
     
     // Set current date for expense and settlement forms
@@ -111,6 +147,9 @@ async function init() {
     if (groupCode) {
         joinGroup(groupCode);
     }
+    
+    // Show connection status
+    updateConnectionStatus();
 }
 
 // Setup event listeners
@@ -871,13 +910,21 @@ async function setupFirebaseSync() {
     if (!window.firebaseDataSync) return;
     
     const groupId = window.firebaseGroupManager.getCurrentGroup();
+    state.groupId = groupId;
+    
     if (!groupId) return;
     
     try {
+        // Show connecting status
+        updateConnectionStatus('connecting');
+        
         // Load initial data from Firebase
         const firebaseData = await window.firebaseDataSync.loadFromFirebase();
         if (firebaseData) {
             mergeData(firebaseData);
+        } else {
+            // No data yet, push our data to Firebase
+            await window.firebaseDataSync.saveToFirebase(state);
         }
         
         // Set up real-time listener
@@ -892,7 +939,20 @@ async function setupFirebaseSync() {
                 if (!lastLocalUpdate || data.lastUpdated > parseInt(lastLocalUpdate)) {
                     mergeData(data);
                     localStorage.setItem('smartsplit_last_update', data.lastUpdated);
+                    
+                    // Update connection status
+                    updateConnectionStatus('connected');
                 }
+            }
+        });
+        
+        // Also listen for connection status
+        const connectedRef = firebase.database().ref('.info/connected');
+        connectedRef.on('value', (snap) => {
+            if (snap.val() === true) {
+                updateConnectionStatus('connected');
+            } else {
+                updateConnectionStatus('disconnected');
             }
         });
         
@@ -900,6 +960,7 @@ async function setupFirebaseSync() {
     } catch (error) {
         console.error("Firebase sync error:", error);
         showToast("Failed to connect to group data", "error");
+        updateConnectionStatus('error');
     }
 }
 
@@ -1475,6 +1536,192 @@ function simplifyDebts(individualBalances) {
 function formatDate(dateString) {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Show welcome modal for first-time users
+function showWelcomeModal() {
+    const modalHTML = `
+        <div class="modal fade" id="welcome-modal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Welcome to SmartSplit!</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Let's get started by setting up your expense group.</p>
+                        <div class="mb-3">
+                            <label for="welcome-user-name" class="form-label">Your Name</label>
+                            <input type="text" class="form-control" id="welcome-user-name" placeholder="Enter your name">
+                        </div>
+                        <div class="mb-3">
+                            <label for="welcome-group-name" class="form-label">Group Name (optional)</label>
+                            <input type="text" class="form-control" id="welcome-group-name" placeholder="Trip to Paris, Roommates, etc.">
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="setup-type" id="setup-new-group" value="new" checked>
+                                <label class="form-check-label" for="setup-new-group">
+                                    Create a new group
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="setup-type" id="setup-join-group" value="join">
+                                <label class="form-check-label" for="setup-join-group">
+                                    Join existing group
+                                </label>
+                            </div>
+                        </div>
+                        <div id="join-group-code-container" class="mb-3 d-none">
+                            <label for="welcome-join-code" class="form-label">Group Code</label>
+                            <input type="text" class="form-control" id="welcome-join-code" placeholder="Enter 6-character code">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Skip</button>
+                        <button type="button" class="btn btn-primary" id="welcome-continue-btn">Continue</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Append modal to body if it doesn't exist
+    if (!document.getElementById('welcome-modal')) {
+        const modalContainer = document.createElement('div');
+        modalContainer.innerHTML = modalHTML;
+        document.body.appendChild(modalContainer);
+        
+        // Add event listeners
+        document.getElementById('setup-join-group').addEventListener('change', () => {
+            document.getElementById('join-group-code-container').classList.remove('d-none');
+            document.getElementById('welcome-group-name').parentElement.classList.add('d-none');
+        });
+        
+        document.getElementById('setup-new-group').addEventListener('change', () => {
+            document.getElementById('join-group-code-container').classList.add('d-none');
+            document.getElementById('welcome-group-name').parentElement.classList.remove('d-none');
+        });
+        
+        document.getElementById('welcome-continue-btn').addEventListener('click', async () => {
+            const userName = document.getElementById('welcome-user-name').value.trim();
+            
+            if (!userName) {
+                showToast('Please enter your name', 'warning');
+                return;
+            }
+            
+            // Save user name
+            state.userName = userName;
+            localStorage.setItem('userName', userName);
+            
+            // Add user as first member if not present
+            if (!state.members.some(m => m.name === userName)) {
+                addMember(userName);
+            }
+            
+            const setupType = document.querySelector('input[name="setup-type"]:checked').value;
+            
+            if (setupType === 'new') {
+                // Create new group
+                const groupName = document.getElementById('welcome-group-name').value.trim() || `${userName}'s Group`;
+                
+                if (window.firebaseGroupManager) {
+                    const result = await createGroup(groupName, userName);
+                    if (result) {
+                        // Hide modal
+                        const modal = bootstrap.Modal.getInstance(document.getElementById('welcome-modal'));
+                        modal.hide();
+                        
+                        showToast(`Created group "${groupName}"`, 'success');
+                    }
+                } else {
+                    // No Firebase, just use local storage
+                    showToast('Created local group (not synced)', 'info');
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('welcome-modal'));
+                    modal.hide();
+                }
+            } else {
+                // Join existing group
+                const joinCode = document.getElementById('welcome-join-code').value.trim();
+                
+                if (!joinCode) {
+                    showToast('Please enter a group code', 'warning');
+                    return;
+                }
+                
+                if (window.firebaseGroupManager) {
+                    const success = await joinGroup(joinCode);
+                    if (success) {
+                        // Hide modal
+                        const modal = bootstrap.Modal.getInstance(document.getElementById('welcome-modal'));
+                        modal.hide();
+                    }
+                } else {
+                    showToast('Cloud sync is not available', 'error');
+                }
+            }
+        });
+    }
+    
+    // Show the modal
+    const welcomeModal = new bootstrap.Modal(document.getElementById('welcome-modal'));
+    welcomeModal.show();
+}
+
+// Update connection status indicator
+function updateConnectionStatus(status = 'unknown') {
+    // Create status indicator if it doesn't exist
+    let statusIndicator = document.getElementById('connection-status');
+    
+    if (!statusIndicator) {
+        statusIndicator = document.createElement('div');
+        statusIndicator.id = 'connection-status';
+        statusIndicator.className = 'connection-status';
+        document.body.appendChild(statusIndicator);
+    }
+    
+    // Update the indicator based on status
+    statusIndicator.className = 'connection-status';
+    
+    let statusText = '';
+    let className = '';
+    
+    switch (status) {
+        case 'connected':
+            statusText = 'Connected';
+            className = 'connected';
+            statusIndicator.innerHTML = '<i class="bi bi-cloud-check"></i> Connected';
+            break;
+        case 'connecting':
+            statusText = 'Connecting...';
+            className = 'connecting';
+            statusIndicator.innerHTML = '<i class="bi bi-cloud-arrow-up"></i> Connecting...';
+            break;
+        case 'disconnected':
+            statusText = 'Offline';
+            className = 'disconnected';
+            statusIndicator.innerHTML = '<i class="bi bi-cloud-slash"></i> Offline';
+            break;
+        case 'error':
+            statusText = 'Connection Error';
+            className = 'error';
+            statusIndicator.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Error';
+            break;
+        default:
+            if (state.groupId) {
+                statusText = 'Connecting...';
+                className = 'connecting';
+                statusIndicator.innerHTML = '<i class="bi bi-cloud-arrow-up"></i> Connecting...';
+            } else {
+                statusText = 'Local Only';
+                className = 'local';
+                statusIndicator.innerHTML = '<i class="bi bi-hdd"></i> Local Only';
+            }
+    }
+    
+    statusIndicator.classList.add(className);
+    statusIndicator.setAttribute('title', statusText);
 }
 
 // Initialize the app when DOM is loaded
