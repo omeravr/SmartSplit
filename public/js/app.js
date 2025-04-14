@@ -8,7 +8,8 @@ const state = {
     currentUser: null, // For future authentication
     nextMemberId: 1,
     nextExpenseId: 1,
-    nextSettlementId: 1
+    nextSettlementId: 1,
+    syncCode: null
 };
 
 // Load data from localStorage
@@ -75,6 +76,7 @@ function showTab(tabId) {
 function init() {
     loadData();
     setupEventListeners();
+    setupSyncEventListeners();
     showTab('dashboard');
     
     // Set current date for expense and settlement forms
@@ -84,6 +86,13 @@ function init() {
     }
     if (document.getElementById('settlement-date')) {
         document.getElementById('settlement-date').value = today;
+    }
+    
+    // Add toast container
+    if (!document.querySelector('.toast-container')) {
+        const toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container';
+        document.body.appendChild(toastContainer);
     }
 }
 
@@ -154,50 +163,22 @@ function setupEventListeners() {
     document.getElementById('expense-form').addEventListener('submit', (e) => {
         e.preventDefault();
         
-        const description = document.getElementById('expense-description').value.trim();
-        const amount = parseFloat(document.getElementById('expense-amount').value);
-        const paidById = parseInt(document.getElementById('expense-payer').value);
-        const date = document.getElementById('expense-date').value;
-        const splitType = document.querySelector('input[name="split-type"]:checked').value;
+        const expenseData = getExpenseFormData();
+        if (!expenseData) return;
         
-        // Get checked members
-        const checkedMembers = Array.from(document.querySelectorAll('input[name="split-member"]:checked'))
-            .map(checkbox => parseInt(checkbox.value));
-        
-        if (checkedMembers.length === 0) {
-            alert('Please select at least one member to split with');
-            return;
-        }
-        
-        let splits = [];
-        
-        if (splitType === 'equal') {
-            // Equal split
-            const splitAmount = amount / checkedMembers.length;
-            splits = checkedMembers.map(memberId => ({
-                memberId,
-                amount: splitAmount
-            }));
-        } else {
-            // Custom split
-            splits = checkedMembers.map(memberId => ({
-                memberId,
-                amount: parseFloat(document.getElementById(`custom-amount-${memberId}`).value)
-            }));
-            
-            // Validate total equals expense amount
-            const totalSplit = splits.reduce((sum, split) => sum + split.amount, 0);
-            if (Math.abs(totalSplit - amount) > 0.01) {
-                alert(`Split amounts must add up to the total expense (${amount})`);
-                return;
-            }
-        }
-        
-        addExpense(description, amount, paidById, date, splits);
+        addExpense(
+            expenseData.description,
+            expenseData.amount,
+            expenseData.paidById,
+            expenseData.date,
+            expenseData.splits,
+            expenseData.category,
+            expenseData.notes
+        );
         
         // Reset form
         document.getElementById('expense-form').reset();
-        document.getElementById('expense-date').value = date; // Keep the date
+        document.getElementById('expense-date').value = expenseData.date; // Keep the date
         
         showTab('dashboard');
     });
@@ -223,13 +204,14 @@ function setupEventListeners() {
         const toId = parseInt(document.getElementById('settlement-to').value);
         const amount = parseFloat(document.getElementById('settlement-amount').value);
         const date = document.getElementById('settlement-date').value;
+        const method = document.getElementById('settlement-method').value;
         
         if (fromId === toId) {
             alert('From and To members must be different');
             return;
         }
         
-        addSettlement(fromId, toId, amount, date);
+        addSettlement(fromId, toId, amount, date, method);
         
         // Reset form but keep the date
         document.getElementById('settlement-form').reset();
@@ -291,7 +273,7 @@ function deleteMember(id) {
 }
 
 // Add a new expense
-function addExpense(description, amount, paidById, date, splits) {
+function addExpense(description, amount, paidById, date, splits, category = 'other', notes = '') {
     const newExpense = {
         id: state.nextExpenseId++,
         description,
@@ -299,12 +281,18 @@ function addExpense(description, amount, paidById, date, splits) {
         paidBy: paidById,
         date,
         splits,
-        createdAt: new Date().toISOString()
+        category,
+        notes,
+        createdAt: new Date().toISOString(),
+        createdBy: state.currentUser || 'anonymous'
     };
     
     state.expenses.push(newExpense);
     saveData();
     renderDashboard();
+    
+    // Show toast notification
+    showToast('Expense added successfully', 'success');
 }
 
 // Delete an expense
@@ -315,20 +303,25 @@ function deleteExpense(id) {
 }
 
 // Add a settlement
-function addSettlement(fromId, toId, amount, date) {
+function addSettlement(fromId, toId, amount, date, method = 'other') {
     const newSettlement = {
         id: state.nextSettlementId++,
         fromMemberId: fromId,
         toMemberId: toId,
         amount,
         date,
-        createdAt: new Date().toISOString()
+        method,
+        createdAt: new Date().toISOString(),
+        createdBy: state.currentUser || 'anonymous'
     };
     
     state.settlements.push(newSettlement);
     saveData();
     renderDashboard();
     renderSettlements();
+    
+    // Show toast notification
+    showToast('Settlement recorded successfully', 'success');
 }
 
 // Setup expense form
@@ -359,6 +352,10 @@ function setupExpenseForm() {
         `;
         splitMembersContainer.appendChild(div);
     });
+    
+    // Set current date
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('expense-date').value = today;
 }
 
 // Setup custom split inputs based on checked members
@@ -547,7 +544,7 @@ function renderAllBalances() {
     container.innerHTML = html || '<p>Everyone is settled up!</p>';
 }
 
-// Render recent activity
+// Render recent activity with more details
 function renderRecentActivity() {
     const container = document.getElementById('recent-activity');
     
@@ -574,13 +571,19 @@ function renderRecentActivity() {
         if (activity.type === 'expense') {
             const expense = activity.data;
             const payer = state.members.find(m => m.id === expense.paidBy);
+            const categoryBadge = getCategoryBadge(expense.category);
             
             html += `
-                <div class="activity-item">
-                    <div class="activity-date">${formatDate(expense.date)}</div>
-                    <div class="activity-title">${expense.description}</div>
-                    <div class="activity-description">
-                        ${payer ? payer.name : 'Unknown'} paid $${expense.amount.toFixed(2)}
+                <div class="activity-item" data-id="${expense.id}" onclick="showExpenseDetails(${expense.id})">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="activity-date">${formatDate(expense.date)}</div>
+                            <div class="activity-title">${expense.description} ${categoryBadge}</div>
+                            <div class="activity-description">
+                                ${payer ? payer.name : 'Unknown'} paid $${expense.amount.toFixed(2)}
+                            </div>
+                        </div>
+                        <span class="badge bg-primary rounded-pill">$${expense.amount.toFixed(2)}</span>
                     </div>
                 </div>
             `;
@@ -591,11 +594,16 @@ function renderRecentActivity() {
             
             html += `
                 <div class="activity-item">
-                    <div class="activity-date">${formatDate(settlement.date)}</div>
-                    <div class="activity-title">Settlement</div>
-                    <div class="activity-description">
-                        ${fromMember ? fromMember.name : 'Unknown'} paid 
-                        ${toMember ? toMember.name : 'Unknown'} $${settlement.amount.toFixed(2)}
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="activity-date">${formatDate(settlement.date)}</div>
+                            <div class="activity-title">Settlement</div>
+                            <div class="activity-description">
+                                ${fromMember ? fromMember.name : 'Unknown'} paid 
+                                ${toMember ? toMember.name : 'Unknown'} $${settlement.amount.toFixed(2)}
+                            </div>
+                        </div>
+                        <span class="badge bg-success rounded-pill">$${settlement.amount.toFixed(2)}</span>
                     </div>
                 </div>
             `;
@@ -605,148 +613,313 @@ function renderRecentActivity() {
     container.innerHTML = html;
 }
 
-// Render the members tab
-function renderMembers() {
-    const container = document.getElementById('members-list');
+// Get category badge HTML
+function getCategoryBadge(category) {
+    const categories = {
+        'food': 'Food & Drinks',
+        'transportation': 'Transportation',
+        'accommodation': 'Accommodation',
+        'activities': 'Activities',
+        'shopping': 'Shopping',
+        'other': 'Other'
+    };
     
-    if (state.members.length === 0) {
-        container.innerHTML = '<p>No members yet. Add your first member to get started.</p>';
-        return;
+    return `<span class="category-badge category-${category}">${categories[category] || 'Other'}</span>`;
+}
+
+// Show expense details in modal
+function showExpenseDetails(expenseId) {
+    const expense = state.expenses.find(e => e.id === expenseId);
+    if (!expense) return;
+    
+    const payer = state.members.find(m => m.id === expense.paidBy);
+    const modal = new bootstrap.Modal(document.getElementById('view-expense-modal'));
+    const container = document.getElementById('expense-details-content');
+    
+    // Calculate who was part of this expense
+    const participants = expense.splits.map(split => {
+        const member = state.members.find(m => m.id === split.memberId);
+        return {
+            name: member ? member.name : 'Unknown',
+            amount: split.amount
+        };
+    });
+    
+    const categoryBadge = getCategoryBadge(expense.category);
+    
+    let html = `
+        <div class="mb-4">
+            <h4>${expense.description}</h4>
+            <div class="d-flex align-items-center mb-2">
+                <div class="me-auto">${categoryBadge}</div>
+                <div class="text-muted">${formatDate(expense.date)}</div>
+            </div>
+            <div class="h3 mb-3">$${expense.amount.toFixed(2)}</div>
+            <div class="mb-3">
+                <strong>Paid by:</strong> ${payer ? payer.name : 'Unknown'}
+            </div>
+            ${expense.notes ? `<div class="mb-3 text-muted">${expense.notes}</div>` : ''}
+        </div>
+        
+        <div class="mb-3">
+            <h5 class="mb-3">Split Details</h5>
+            <div class="list-group">
+    `;
+    
+    participants.forEach(participant => {
+        html += `
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <div>${participant.name}</div>
+                <div>$${participant.amount.toFixed(2)}</div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+        
+        <div class="text-muted small">
+            Added on ${formatDateTime(expense.createdAt)}
+            ${expense.createdBy !== 'anonymous' ? `by ${expense.createdBy}` : ''}
+        </div>
+    `;
+    
+    container.innerHTML = html;
+    
+    // Set the expense ID on the delete button
+    document.getElementById('delete-expense-btn').dataset.expenseId = expense.id;
+    
+    modal.show();
+}
+
+// Format date and time
+function formatDateTime(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', { 
+        day: 'numeric', 
+        month: 'short', 
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+}
+
+// Show toast notification
+function showToast(message, type = 'info') {
+    // Create toast container if it doesn't exist
+    let toastContainer = document.querySelector('.toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container';
+        document.body.appendChild(toastContainer);
     }
     
-    let html = '';
-    state.members.forEach(member => {
-        // Get member's current balance
-        const balances = calculateBalances();
-        const balance = balances[member.id] || 0;
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = 'toast show';
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive');
+    toast.setAttribute('aria-atomic', 'true');
+    
+    // Set background color based on type
+    let bgColor = 'bg-info';
+    let icon = 'bi-info-circle';
+    
+    if (type === 'success') {
+        bgColor = 'bg-success';
+        icon = 'bi-check-circle';
+    } else if (type === 'error') {
+        bgColor = 'bg-danger';
+        icon = 'bi-exclamation-circle';
+    } else if (type === 'warning') {
+        bgColor = 'bg-warning';
+        icon = 'bi-exclamation-triangle';
+    }
+    
+    // Set toast content
+    toast.innerHTML = `
+        <div class="toast-header">
+            <i class="bi ${icon} me-2 text-${type}"></i>
+            <strong class="me-auto">SmartSplit</strong>
+            <small>just now</small>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body">
+            ${message}
+        </div>
+    `;
+    
+    // Add to container
+    toastContainer.appendChild(toast);
+    
+    // Remove after 5 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            toastContainer.removeChild(toast);
+        }, 300);
+    }, 5000);
+}
+
+// Generate a sync code from the current state
+function generateSyncCode() {
+    const data = {
+        members: state.members,
+        expenses: state.expenses,
+        settlements: state.settlements,
+        nextMemberId: state.nextMemberId,
+        nextExpenseId: state.nextExpenseId,
+        nextSettlementId: state.nextSettlementId,
+        timestamp: new Date().toISOString()
+    };
+    
+    const jsonData = JSON.stringify(data);
+    // Use base64 encoding for the sync code
+    return btoa(jsonData);
+}
+
+// Import data from a sync code
+function importSyncCode(syncCode) {
+    try {
+        // Decode the sync code
+        const jsonData = atob(syncCode);
+        const data = JSON.parse(jsonData);
         
-        let balanceClass = 'amount-neutral';
-        let balanceText = 'settled up';
-        
-        if (balance > 0) {
-            balanceClass = 'amount-positive';
-            balanceText = `gets back $${balance.toFixed(2)}`;
-        } else if (balance < 0) {
-            balanceClass = 'amount-negative';
-            balanceText = `owes $${Math.abs(balance).toFixed(2)}`;
+        // Validate the data
+        if (!data.members || !data.expenses || !data.settlements) {
+            throw new Error('Invalid sync code format');
         }
         
-        // Create initials for avatar
-        const initials = member.name.split(' ')
-            .map(n => n[0])
-            .join('')
-            .toUpperCase()
-            .substring(0, 2);
+        // If current data is empty, just use the imported data
+        if (state.members.length === 0 && state.expenses.length === 0 && state.settlements.length === 0) {
+            state.members = data.members;
+            state.expenses = data.expenses;
+            state.settlements = data.settlements;
+            state.nextMemberId = data.nextMemberId || Math.max(...data.members.map(m => m.id), 0) + 1;
+            state.nextExpenseId = data.nextExpenseId || Math.max(...data.expenses.map(e => e.id), 0) + 1;
+            state.nextSettlementId = data.nextSettlementId || Math.max(...data.settlements.map(s => s.id), 0) + 1;
+        } else {
+            // Merge members
+            data.members.forEach(importedMember => {
+                const existingMember = state.members.find(m => m.id === importedMember.id);
+                if (!existingMember) {
+                    state.members.push(importedMember);
+                }
+            });
+            
+            // Merge expenses
+            data.expenses.forEach(importedExpense => {
+                const existingExpense = state.expenses.find(e => e.id === importedExpense.id);
+                if (!existingExpense) {
+                    state.expenses.push(importedExpense);
+                }
+            });
+            
+            // Merge settlements
+            data.settlements.forEach(importedSettlement => {
+                const existingSettlement = state.settlements.find(s => s.id === importedSettlement.id);
+                if (!existingSettlement) {
+                    state.settlements.push(importedSettlement);
+                }
+            });
+            
+            // Update counters
+            state.nextMemberId = Math.max(state.nextMemberId, data.nextMemberId || 0);
+            state.nextExpenseId = Math.max(state.nextExpenseId, data.nextExpenseId || 0);
+            state.nextSettlementId = Math.max(state.nextSettlementId, data.nextSettlementId || 0);
+        }
         
-        html += `
-            <div class="member-item" data-id="${member.id}">
-                <div class="member-avatar">${initials}</div>
-                <div class="member-details">
-                    <div class="member-name">${member.name}</div>
-                    <div class="member-email">${member.email || 'No email'}</div>
-                </div>
-                <div class="${balanceClass} me-3">${balanceText}</div>
-                <button class="btn btn-sm btn-outline-primary edit-member-btn" data-id="${member.id}">
-                    Edit
-                </button>
-            </div>
-        `;
+        // Save data and refresh UI
+        saveData();
+        showTab('dashboard');
+        
+        return true;
+    } catch (error) {
+        console.error('Error importing sync code:', error);
+        return false;
+    }
+}
+
+// Setup event listeners for syncing
+function setupSyncEventListeners() {
+    document.getElementById('sync-code').textContent = generateSyncCode();
+    
+    document.getElementById('import-btn').addEventListener('click', () => {
+        const syncCode = document.getElementById('import-code').value.trim();
+        if (!syncCode) {
+            showToast('Please enter a sync code', 'warning');
+            return;
+        }
+        
+        const success = importSyncCode(syncCode);
+        if (success) {
+            showToast('Data imported successfully', 'success');
+            const modal = bootstrap.Modal.getInstance(document.getElementById('sync-modal'));
+            modal.hide();
+        } else {
+            showToast('Invalid sync code', 'error');
+        }
     });
     
-    container.innerHTML = html;
-    
-    // Add event listener to edit buttons
-    document.querySelectorAll('.edit-member-btn').forEach(button => {
-        button.addEventListener('click', () => {
-            const memberId = parseInt(button.dataset.id);
-            const member = state.members.find(m => m.id === memberId);
-            
-            if (member) {
-                document.getElementById('edit-member-id').value = member.id;
-                document.getElementById('edit-member-name').value = member.name;
-                document.getElementById('edit-member-email').value = member.email || '';
-                
-                const modal = new bootstrap.Modal(document.getElementById('edit-member-modal'));
-                modal.show();
-            }
-        });
+    // Re-generate sync code when modal opens
+    document.getElementById('sync-modal').addEventListener('show.bs.modal', () => {
+        document.getElementById('sync-code').textContent = generateSyncCode();
     });
 }
 
-// Render settlements tab
-function renderSettlements() {
-    renderSuggestedSettlements();
-}
-
-// Render suggested settlements
-function renderSuggestedSettlements() {
-    const container = document.getElementById('suggested-settlements');
+// Get expense form data
+function getExpenseFormData() {
+    const description = document.getElementById('expense-description').value.trim();
+    const amount = parseFloat(document.getElementById('expense-amount').value);
+    const paidById = parseInt(document.getElementById('expense-payer').value);
+    const date = document.getElementById('expense-date').value;
+    const splitType = document.querySelector('input[name="split-type"]:checked').value;
+    const category = document.getElementById('expense-category').value;
+    const notes = document.getElementById('expense-notes').value.trim();
     
-    if (state.members.length < 2) {
-        container.innerHTML = '<p>Need at least 2 members to calculate settlements.</p>';
-        return;
+    // Get checked members
+    const checkedMembers = Array.from(document.querySelectorAll('input[name="split-member"]:checked'))
+        .map(checkbox => parseInt(checkbox.value));
+    
+    if (checkedMembers.length === 0) {
+        alert('Please select at least one member to split with');
+        return null;
     }
     
-    const individualBalances = calculateIndividualBalances();
+    let splits = [];
     
-    if (Object.keys(individualBalances).length === 0) {
-        container.innerHTML = '<p>No expenses recorded yet.</p>';
-        return;
-    }
-    
-    // Generate simplified balances for display
-    const simplifiedBalances = simplifyDebts(individualBalances);
-    
-    if (simplifiedBalances.length === 0) {
-        container.innerHTML = '<p>Everyone is settled up!</p>';
-        return;
-    }
-    
-    let html = '';
-    simplifiedBalances.forEach(balance => {
-        const fromMember = state.members.find(m => m.id === balance.from);
-        const toMember = state.members.find(m => m.id === balance.to);
+    if (splitType === 'equal') {
+        // Equal split
+        const splitAmount = amount / checkedMembers.length;
+        splits = checkedMembers.map(memberId => ({
+            memberId,
+            amount: splitAmount
+        }));
+    } else {
+        // Custom split
+        splits = checkedMembers.map(memberId => ({
+            memberId,
+            amount: parseFloat(document.getElementById(`custom-amount-${memberId}`).value)
+        }));
         
-        if (!fromMember || !toMember) return;
-        
-        html += `
-            <div class="settlement-suggestion">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <strong>${fromMember.name}</strong> should pay <strong>${toMember.name}</strong>
-                    </div>
-                    <div class="amount-negative">$${balance.amount.toFixed(2)}</div>
-                </div>
-                <div class="mt-2">
-                    <button class="btn btn-sm btn-primary record-this-settlement-btn" 
-                        data-from="${fromMember.id}" 
-                        data-to="${toMember.id}" 
-                        data-amount="${balance.amount.toFixed(2)}">
-                        Record this settlement
-                    </button>
-                </div>
-            </div>
-        `;
-    });
+        // Validate total equals expense amount
+        const totalSplit = splits.reduce((sum, split) => sum + split.amount, 0);
+        if (Math.abs(totalSplit - amount) > 0.01) {
+            alert(`Split amounts must add up to the total expense (${amount})`);
+            return null;
+        }
+    }
     
-    container.innerHTML = html;
-    
-    // Add event listeners to quick record buttons
-    document.querySelectorAll('.record-this-settlement-btn').forEach(button => {
-        button.addEventListener('click', () => {
-            const fromId = parseInt(button.dataset.from);
-            const toId = parseInt(button.dataset.to);
-            const amount = parseFloat(button.dataset.amount);
-            
-            // Pre-fill the settlement form
-            document.getElementById('settlement-from').value = fromId;
-            document.getElementById('settlement-to').value = toId;
-            document.getElementById('settlement-amount').value = amount.toFixed(2);
-            
-            // Scroll to the form
-            document.getElementById('settlement-form').scrollIntoView({ behavior: 'smooth' });
-        });
-    });
+    return {
+        description,
+        amount,
+        paidById,
+        date,
+        splits,
+        category,
+        notes
+    };
 }
 
 // Helper function to calculate all member balances
