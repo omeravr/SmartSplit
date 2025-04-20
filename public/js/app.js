@@ -92,19 +92,19 @@ function showTab(tabId) {
 
 // Initialize the application
 async function init() {
-    // Initialize Clerk first
-    await window.clerkAuth.initClerk();
+    // Initialize Firebase Auth first
+    await window.firebaseAuth.initAuth();
     
     // Check if user is authenticated
-    if (!window.clerkAuth.isAuthenticated()) {
+    if (!window.firebaseAuth.isAuthenticated()) {
         showWelcomeModal();
         return;
     }
 
-    // Get current user from Clerk
-    const currentUser = window.clerkAuth.getCurrentUser();
-    state.currentUser = currentUser.emailAddresses[0].emailAddress;
-    state.userName = currentUser.firstName || currentUser.emailAddresses[0].emailAddress;
+    // Get current user from Firebase Auth
+    const currentUser = window.firebaseAuth.getCurrentUser();
+    state.currentUser = currentUser.email;
+    state.userName = currentUser.displayName || currentUser.email;
 
     // Check if user is already part of a group
     const savedGroupId = localStorage.getItem('currentGroupId');
@@ -1559,8 +1559,40 @@ function showWelcomeModal() {
                     </div>
                     <div class="modal-body">
                         <div data-auth="unauthenticated">
-                            <p>Please sign in to continue.</p>
-                            <button class="btn btn-primary" onclick="window.clerkAuth.handleSignIn()">Sign In</button>
+                            <div id="sign-in-form" class="mb-3">
+                                <h6>Sign In</h6>
+                                <div class="mb-3">
+                                    <input type="email" class="form-control" id="sign-in-email" placeholder="Email">
+                                </div>
+                                <div class="mb-3">
+                                    <input type="password" class="form-control" id="sign-in-password" placeholder="Password">
+                                </div>
+                                <button class="btn btn-primary" onclick="handleSignIn()">Sign In</button>
+                                <button class="btn btn-link" onclick="showSignUpForm()">Create Account</button>
+                                <button class="btn btn-link" onclick="showResetPasswordForm()">Forgot Password?</button>
+                            </div>
+                            <div id="sign-up-form" class="mb-3 d-none">
+                                <h6>Create Account</h6>
+                                <div class="mb-3">
+                                    <input type="text" class="form-control" id="sign-up-name" placeholder="Name">
+                                </div>
+                                <div class="mb-3">
+                                    <input type="email" class="form-control" id="sign-up-email" placeholder="Email">
+                                </div>
+                                <div class="mb-3">
+                                    <input type="password" class="form-control" id="sign-up-password" placeholder="Password">
+                                </div>
+                                <button class="btn btn-primary" onclick="handleSignUp()">Create Account</button>
+                                <button class="btn btn-link" onclick="showSignInForm()">Back to Sign In</button>
+                            </div>
+                            <div id="reset-password-form" class="mb-3 d-none">
+                                <h6>Reset Password</h6>
+                                <div class="mb-3">
+                                    <input type="email" class="form-control" id="reset-password-email" placeholder="Email">
+                                </div>
+                                <button class="btn btn-primary" onclick="handleResetPassword()">Send Reset Link</button>
+                                <button class="btn btn-link" onclick="showSignInForm()">Back to Sign In</button>
+                            </div>
                         </div>
                         <div data-auth="authenticated">
                             <p>Let's get started by setting up your expense group.</p>
@@ -1620,16 +1652,12 @@ function showWelcomeModal() {
         });
         
         document.getElementById('welcome-continue-btn').addEventListener('click', async () => {
-            const userName = document.getElementById('welcome-user-name').value.trim();
+            const userName = state.userName;
             
             if (!userName) {
                 showToast('Please enter your name', 'warning');
                 return;
             }
-            
-            // Save user name
-            state.userName = userName;
-            localStorage.setItem('userName', userName);
             
             // Add user as first member if not present
             if (!state.members.some(m => m.name === userName)) {
@@ -1683,6 +1711,62 @@ function showWelcomeModal() {
     // Show the modal
     const welcomeModal = new bootstrap.Modal(document.getElementById('welcome-modal'));
     welcomeModal.show();
+}
+
+// Authentication helper functions
+function showSignUpForm() {
+    document.getElementById('sign-in-form').classList.add('d-none');
+    document.getElementById('reset-password-form').classList.add('d-none');
+    document.getElementById('sign-up-form').classList.remove('d-none');
+}
+
+function showSignInForm() {
+    document.getElementById('sign-up-form').classList.add('d-none');
+    document.getElementById('reset-password-form').classList.add('d-none');
+    document.getElementById('sign-in-form').classList.remove('d-none');
+}
+
+function showResetPasswordForm() {
+    document.getElementById('sign-in-form').classList.add('d-none');
+    document.getElementById('sign-up-form').classList.add('d-none');
+    document.getElementById('reset-password-form').classList.remove('d-none');
+}
+
+async function handleSignIn() {
+    const email = document.getElementById('sign-in-email').value;
+    const password = document.getElementById('sign-in-password').value;
+    
+    try {
+        await window.firebaseAuth.signIn(email, password);
+        showToast('Signed in successfully', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function handleSignUp() {
+    const name = document.getElementById('sign-up-name').value;
+    const email = document.getElementById('sign-up-email').value;
+    const password = document.getElementById('sign-up-password').value;
+    
+    try {
+        await window.firebaseAuth.signUp(email, password, name);
+        showToast('Account created successfully', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function handleResetPassword() {
+    const email = document.getElementById('reset-password-email').value;
+    
+    try {
+        await window.firebaseAuth.resetPassword(email);
+        showToast('Password reset email sent', 'success');
+        showSignInForm();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
 }
 
 // Update connection status indicator
