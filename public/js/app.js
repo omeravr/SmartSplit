@@ -92,29 +92,15 @@ function showTab(tabId) {
 
 // Initialize the application
 async function init() {
-    // Initialize Firebase Auth first
-    await window.firebaseAuth.initAuth();
-    
-    // Check if user is authenticated
-    if (!window.firebaseAuth.isAuthenticated()) {
-        showWelcomeModal();
-        return;
-    }
-
-    // Get current user from Firebase Auth
-    const currentUser = window.firebaseAuth.getCurrentUser();
-    state.currentUser = currentUser.email;
-    state.userName = currentUser.displayName || currentUser.email;
-
-    // Check if user is already part of a group
-    const savedGroupId = localStorage.getItem('currentGroupId');
-    
     // Load local data first
     loadData();
     
     // Setup all event listeners
     setupEventListeners();
     setupSyncEventListeners();
+    
+    // Check if user is already part of a group
+    const savedGroupId = localStorage.getItem('currentGroupId');
     
     // If the user already has a group ID, connect to it automatically
     if (savedGroupId && window.firebaseGroupManager) {
@@ -1558,76 +1544,37 @@ function showWelcomeModal() {
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <div data-auth="unauthenticated">
-                            <div id="sign-in-form" class="mb-3">
-                                <h6>Sign In</h6>
-                                <div class="mb-3">
-                                    <input type="email" class="form-control" id="sign-in-email" placeholder="Email">
-                                </div>
-                                <div class="mb-3">
-                                    <input type="password" class="form-control" id="sign-in-password" placeholder="Password">
-                                </div>
-                                <button class="btn btn-primary" onclick="handleSignIn()">Sign In</button>
-                                <button class="btn btn-link" onclick="showSignUpForm()">Create Account</button>
-                                <button class="btn btn-link" onclick="showResetPasswordForm()">Forgot Password?</button>
+                        <p>Let's get started by setting up your expense group.</p>
+                        <div class="mb-3">
+                            <label for="welcome-user-name" class="form-label">Your Name</label>
+                            <input type="text" class="form-control" id="welcome-user-name" placeholder="Enter your name">
+                        </div>
+                        <div class="mb-3">
+                            <label for="welcome-group-name" class="form-label">Group Name</label>
+                            <input type="text" class="form-control" id="welcome-group-name" placeholder="Trip to Paris, Roommates, etc.">
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="setup-type" id="setup-new-group" value="new" checked>
+                                <label class="form-check-label" for="setup-new-group">
+                                    Create a new group
+                                </label>
                             </div>
-                            <div id="sign-up-form" class="mb-3 d-none">
-                                <h6>Create Account</h6>
-                                <div class="mb-3">
-                                    <input type="text" class="form-control" id="sign-up-name" placeholder="Name">
-                                </div>
-                                <div class="mb-3">
-                                    <input type="email" class="form-control" id="sign-up-email" placeholder="Email">
-                                </div>
-                                <div class="mb-3">
-                                    <input type="password" class="form-control" id="sign-up-password" placeholder="Password">
-                                </div>
-                                <button class="btn btn-primary" onclick="handleSignUp()">Create Account</button>
-                                <button class="btn btn-link" onclick="showSignInForm()">Back to Sign In</button>
-                            </div>
-                            <div id="reset-password-form" class="mb-3 d-none">
-                                <h6>Reset Password</h6>
-                                <div class="mb-3">
-                                    <input type="email" class="form-control" id="reset-password-email" placeholder="Email">
-                                </div>
-                                <button class="btn btn-primary" onclick="handleResetPassword()">Send Reset Link</button>
-                                <button class="btn btn-link" onclick="showSignInForm()">Back to Sign In</button>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="setup-type" id="setup-join-group" value="join">
+                                <label class="form-check-label" for="setup-join-group">
+                                    Join existing group
+                                </label>
                             </div>
                         </div>
-                        <div data-auth="authenticated">
-                            <p>Let's get started by setting up your expense group.</p>
-                            <div class="mb-3">
-                                <label for="welcome-group-name" class="form-label">Group Name</label>
-                                <input type="text" class="form-control" id="welcome-group-name" placeholder="Trip to Paris, Roommates, etc.">
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="setup-type" id="setup-new-group" value="new" checked>
-                                    <label class="form-check-label" for="setup-new-group">
-                                        Create a new group
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="setup-type" id="setup-join-group" value="join">
-                                    <label class="form-check-label" for="setup-join-group">
-                                        Join existing group
-                                    </label>
-                                </div>
-                            </div>
-                            <div id="join-group-code-container" class="mb-3 d-none">
-                                <label for="welcome-join-code" class="form-label">Group Code</label>
-                                <input type="text" class="form-control" id="welcome-join-code" placeholder="Enter 6-character code">
-                            </div>
+                        <div id="join-group-code-container" class="mb-3 d-none">
+                            <label for="welcome-join-code" class="form-label">Group Code</label>
+                            <input type="text" class="form-control" id="welcome-join-code" placeholder="Enter 6-character code">
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <div data-auth="unauthenticated">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        </div>
-                        <div data-auth="authenticated">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Skip</button>
-                            <button type="button" class="btn btn-primary" id="welcome-continue-btn">Continue</button>
-                        </div>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Skip</button>
+                        <button type="button" class="btn btn-primary" id="welcome-continue-btn">Continue</button>
                     </div>
                 </div>
             </div>
@@ -1652,12 +1599,14 @@ function showWelcomeModal() {
         });
         
         document.getElementById('welcome-continue-btn').addEventListener('click', async () => {
-            const userName = state.userName;
+            const userName = document.getElementById('welcome-user-name').value.trim();
             
             if (!userName) {
                 showToast('Please enter your name', 'warning');
                 return;
             }
+            
+            state.userName = userName;
             
             // Add user as first member if not present
             if (!state.members.some(m => m.name === userName)) {
