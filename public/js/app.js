@@ -92,13 +92,22 @@ function showTab(tabId) {
 
 // Initialize the application
 async function init() {
+    // Initialize Clerk first
+    await window.clerkAuth.initClerk();
+    
+    // Check if user is authenticated
+    if (!window.clerkAuth.isAuthenticated()) {
+        showWelcomeModal();
+        return;
+    }
+
+    // Get current user from Clerk
+    const currentUser = window.clerkAuth.getCurrentUser();
+    state.currentUser = currentUser.emailAddresses[0].emailAddress;
+    state.userName = currentUser.firstName || currentUser.emailAddresses[0].emailAddress;
+
     // Check if user is already part of a group
     const savedGroupId = localStorage.getItem('currentGroupId');
-    const savedUserName = localStorage.getItem('userName');
-    
-    if (savedUserName) {
-        state.userName = savedUserName;
-    }
     
     // Load local data first
     loadData();
@@ -1549,37 +1558,44 @@ function showWelcomeModal() {
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <p>Let's get started by setting up your expense group.</p>
-                        <div class="mb-3">
-                            <label for="welcome-user-name" class="form-label">Your Name</label>
-                            <input type="text" class="form-control" id="welcome-user-name" placeholder="Enter your name">
+                        <div data-auth="unauthenticated">
+                            <p>Please sign in to continue.</p>
+                            <button class="btn btn-primary" onclick="window.clerkAuth.handleSignIn()">Sign In</button>
                         </div>
-                        <div class="mb-3">
-                            <label for="welcome-group-name" class="form-label">Group Name (optional)</label>
-                            <input type="text" class="form-control" id="welcome-group-name" placeholder="Trip to Paris, Roommates, etc.">
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="setup-type" id="setup-new-group" value="new" checked>
-                                <label class="form-check-label" for="setup-new-group">
-                                    Create a new group
-                                </label>
+                        <div data-auth="authenticated">
+                            <p>Let's get started by setting up your expense group.</p>
+                            <div class="mb-3">
+                                <label for="welcome-group-name" class="form-label">Group Name</label>
+                                <input type="text" class="form-control" id="welcome-group-name" placeholder="Trip to Paris, Roommates, etc.">
                             </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="setup-type" id="setup-join-group" value="join">
-                                <label class="form-check-label" for="setup-join-group">
-                                    Join existing group
-                                </label>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="setup-type" id="setup-new-group" value="new" checked>
+                                    <label class="form-check-label" for="setup-new-group">
+                                        Create a new group
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="setup-type" id="setup-join-group" value="join">
+                                    <label class="form-check-label" for="setup-join-group">
+                                        Join existing group
+                                    </label>
+                                </div>
                             </div>
-                        </div>
-                        <div id="join-group-code-container" class="mb-3 d-none">
-                            <label for="welcome-join-code" class="form-label">Group Code</label>
-                            <input type="text" class="form-control" id="welcome-join-code" placeholder="Enter 6-character code">
+                            <div id="join-group-code-container" class="mb-3 d-none">
+                                <label for="welcome-join-code" class="form-label">Group Code</label>
+                                <input type="text" class="form-control" id="welcome-join-code" placeholder="Enter 6-character code">
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Skip</button>
-                        <button type="button" class="btn btn-primary" id="welcome-continue-btn">Continue</button>
+                        <div data-auth="unauthenticated">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                        <div data-auth="authenticated">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Skip</button>
+                            <button type="button" class="btn btn-primary" id="welcome-continue-btn">Continue</button>
+                        </div>
                     </div>
                 </div>
             </div>

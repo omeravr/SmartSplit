@@ -3,364 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartSplit - Share Expenses with Friends</title>
-    <link rel="stylesheet" href="public/css/style.css">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#5E72E4">
-    <link rel="apple-touch-icon" href="public/images/icon-192.png">
-    
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <title>SmartSplit - Expense Sharing Made Easy</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="public/css/styles.css" rel="stylesheet">
 </head>
 <body>
-    <div class="app-container" id="app">
-        <header class="app-header">
-            <div class="container">
-                <div class="text-center py-4">
-                    <h1 class="app-title">SmartSplit</h1>
-                    <p class="app-subtitle">Split expenses with friends easily</p>
-                </div>
-            </div>
-        </header>
-
-        <div class="container main-content">
-            <nav class="nav-tabs nav mb-3">
-                <button class="nav-link active" id="dashboard-tab" onclick="showTab('dashboard')">
-                    <i class="bi bi-house-door"></i> Dashboard
-                </button>
-                <button class="nav-link" id="expense-tab" onclick="showTab('expense')">
-                    <i class="bi bi-plus-circle"></i> Add
-                </button>
-                <button class="nav-link" id="members-tab" onclick="showTab('members')">
-                    <i class="bi bi-people"></i> Members
-                </button>
-                <button class="nav-link" id="settlements-tab" onclick="showTab('settlements')">
-                    <i class="bi bi-arrow-left-right"></i> Settle
-                </button>
-            </nav>
-
-            <div id="dashboard" class="tab-content active">
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="card mb-4">
-                            <div class="card-header">
-                                <h5><i class="bi bi-pie-chart"></i> Summary</h5>
-                            </div>
-                            <div class="card-body">
-                                <div id="balance-summary">
-                                    <p>Loading balances...</p>
-                                </div>
-                            </div>
-                        </div>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">SmartSplit</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('dashboard')">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('expense')">Add Expense</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('settlements')">Settlements</a>
+                    </li>
+                </ul>
+                <div class="navbar-nav">
+                    <div data-auth="unauthenticated">
+                        <button class="btn btn-outline-light" onclick="window.clerkAuth.handleSignIn()">Sign In</button>
                     </div>
-                    <div class="col-md-6">
-                        <div class="card mb-4">
-                            <div class="card-header">
-                                <h5><i class="bi bi-activity"></i> Recent Activity</h5>
-                            </div>
-                            <div class="card-body">
-                                <div id="recent-activity">
-                                    <p>Loading activity...</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="bi bi-cash-stack"></i> All Balances</h5>
-                        <button class="btn btn-sm btn-primary" onclick="showTab('settlements')">
-                            <i class="bi bi-arrow-left-right"></i> Settle Up
-                        </button>
-                    </div>
-                    <div class="card-body">
-                        <div id="all-balances">
-                            <p>Loading all balances...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="expense" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="bi bi-receipt"></i> Add New Expense</h5>
-                    </div>
-                    <div class="card-body">
-                        <form id="expense-form">
-                            <div class="mb-3">
-                                <label for="expense-description" class="form-label">Description</label>
-                                <input type="text" class="form-control" id="expense-description" required placeholder="Dinner, Taxi, etc.">
-                            </div>
-                            <div class="mb-3">
-                                <label for="expense-notes" class="form-label">Notes (optional)</label>
-                                <textarea class="form-control" id="expense-notes" rows="2" placeholder="Additional details about this expense..."></textarea>
-                            </div>
-                            <div class="mb-3">
-                                <label for="expense-category" class="form-label">Category</label>
-                                <select class="form-select" id="expense-category">
-                                    <option value="food">Food & Drinks</option>
-                                    <option value="transportation">Transportation</option>
-                                    <option value="accommodation">Accommodation</option>
-                                    <option value="activities">Activities</option>
-                                    <option value="shopping">Shopping</option>
-                                    <option value="other">Other</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label for="expense-amount" class="form-label">Amount</label>
-                                <div class="input-group">
-                                    <span class="input-group-text">$</span>
-                                    <input type="number" step="0.01" min="0" class="form-control" id="expense-amount" required placeholder="0.00">
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label for="expense-payer" class="form-label">Paid by</label>
-                                <select class="form-select" id="expense-payer" required>
-                                    <option value="" disabled selected>Select who paid</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Split between</label>
-                                <div id="expense-split-members" class="mt-2">
-                                    <!-- Members checkboxes will be added here dynamically -->
-                                    <p>Loading members...</p>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Split type</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="split-type" id="split-equal" value="equal" checked>
-                                    <label class="form-check-label" for="split-equal">
-                                        Equal
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="split-type" id="split-custom" value="custom">
-                                    <label class="form-check-label" for="split-custom">
-                                        Custom
-                                    </label>
-                                </div>
-                            </div>
-                            <div id="custom-split-container" class="mb-3 d-none">
-                                <!-- Custom split inputs will be added here dynamically -->
-                            </div>
-                            <div class="mb-3">
-                                <label for="expense-date" class="form-label">Date</label>
-                                <input type="date" class="form-control" id="expense-date" required>
-                            </div>
-                            <div class="d-grid">
-                                <button type="submit" class="btn btn-primary btn-lg">Add Expense</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <div id="members" class="tab-content">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="bi bi-people"></i> Group Members</h5>
-                        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#add-member-modal">
-                            <i class="bi bi-person-plus"></i> Add Member
-                        </button>
-                    </div>
-                    <div class="card-body">
-                        <div id="members-list">
-                            <p>Loading members...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="settlements" class="tab-content">
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5><i class="bi bi-graph-up-arrow"></i> Suggested Settlements</h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="suggested-settlements">
-                            <p>Loading settlement suggestions...</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="bi bi-arrow-left-right"></i> Record a Settlement</h5>
-                    </div>
-                    <div class="card-body">
-                        <form id="settlement-form">
-                            <div class="mb-3">
-                                <label for="settlement-from" class="form-label">From</label>
-                                <select class="form-select" id="settlement-from" required>
-                                    <option value="" disabled selected>Select payer</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label for="settlement-to" class="form-label">To</label>
-                                <select class="form-select" id="settlement-to" required>
-                                    <option value="" disabled selected>Select recipient</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label for="settlement-amount" class="form-label">Amount</label>
-                                <div class="input-group">
-                                    <span class="input-group-text">$</span>
-                                    <input type="number" step="0.01" min="0" class="form-control" id="settlement-amount" required placeholder="0.00">
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label for="settlement-date" class="form-label">Date</label>
-                                <input type="date" class="form-control" id="settlement-date" required>
-                            </div>
-                            <div class="mb-3">
-                                <label for="settlement-method" class="form-label">Payment Method</label>
-                                <select class="form-select" id="settlement-method">
-                                    <option value="cash">Cash</option>
-                                    <option value="bank">Bank Transfer</option>
-                                    <option value="venmo">Venmo</option>
-                                    <option value="paypal">PayPal</option>
-                                    <option value="other">Other</option>
-                                </select>
-                            </div>
-                            <div class="d-grid">
-                                <button type="submit" class="btn btn-primary btn-lg">Record Settlement</button>
-                            </div>
-                        </form>
+                    <div data-auth="authenticated" class="d-flex align-items-center">
+                        <span class="text-light me-3" data-user-info="name"></span>
+                        <button class="btn btn-outline-light" onclick="window.clerkAuth.handleSignOut()">Sign Out</button>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+    </nav>
 
-    <!-- Add Member Modal -->
-    <div class="modal fade" id="add-member-modal" tabindex="-1" aria-labelledby="add-member-modal-label" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="add-member-modal-label"><i class="bi bi-person-plus"></i> Add New Member</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <!-- Main Content -->
+    <div class="container mt-4">
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <h2>Dashboard</h2>
+            <div id="balance-summary" class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Balance Summary</h5>
+                    <!-- Balance summary content will be dynamically populated -->
                 </div>
-                <div class="modal-body">
-                    <form id="add-member-form">
-                        <div class="mb-3">
-                            <label for="member-name" class="form-label">Name</label>
-                            <input type="text" class="form-control" id="member-name" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="member-email" class="form-label">Email (optional)</label>
-                            <input type="email" class="form-control" id="member-email">
-                        </div>
-                        <div class="mb-3">
-                            <label for="member-phone" class="form-label">Phone (optional)</label>
-                            <input type="tel" class="form-control" id="member-phone">
-                        </div>
+            </div>
+            <div id="all-balances" class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">All Balances</h5>
+                    <!-- All balances content will be dynamically populated -->
+                </div>
+            </div>
+            <div id="recent-activity" class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Recent Activity</h5>
+                    <!-- Recent activity content will be dynamically populated -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Expense Tab -->
+        <div id="expense" class="tab-content">
+            <h2>Add Expense</h2>
+            <form id="expense-form" class="card">
+                <div class="card-body">
+                    <!-- Expense form content will be dynamically populated -->
+                </div>
+            </form>
+        </div>
+
+        <!-- Settlements Tab -->
+        <div id="settlements" class="tab-content">
+            <h2>Settlements</h2>
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Record Settlement</h5>
+                    <form id="settlement-form">
+                        <!-- Settlement form content will be dynamically populated -->
                     </form>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="save-member-btn">Save</button>
+            </div>
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Settlement History</h5>
+                    <!-- Settlement history content will be dynamically populated -->
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Edit Member Modal -->
-    <div class="modal fade" id="edit-member-modal" tabindex="-1" aria-labelledby="edit-member-modal-label" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="edit-member-modal-label"><i class="bi bi-person-gear"></i> Edit Member</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="edit-member-form">
-                        <input type="hidden" id="edit-member-id">
-                        <div class="mb-3">
-                            <label for="edit-member-name" class="form-label">Name</label>
-                            <input type="text" class="form-control" id="edit-member-name" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="edit-member-email" class="form-label">Email (optional)</label>
-                            <input type="email" class="form-control" id="edit-member-email">
-                        </div>
-                        <div class="mb-3">
-                            <label for="edit-member-phone" class="form-label">Phone (optional)</label>
-                            <input type="tel" class="form-control" id="edit-member-phone">
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-danger me-auto" id="delete-member-btn">Delete</button>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="update-member-btn">Update</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- View Expense Modal -->
-    <div class="modal fade" id="view-expense-modal" tabindex="-1" aria-labelledby="view-expense-modal-label" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="view-expense-modal-label"><i class="bi bi-receipt"></i> Expense Details</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body" id="expense-details-content">
-                    <!-- Expense details will be loaded here -->
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-danger me-auto" id="delete-expense-btn">Delete</button>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" id="edit-expense-btn">Edit</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Data Sync Modal -->
-    <div class="modal fade" id="sync-modal" tabindex="-1" aria-labelledby="sync-modal-label" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="sync-modal-label"><i class="bi bi-cloud-arrow-up"></i> Sync Data</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p>Share this code with your friends to sync data:</p>
-                    <div class="p-3 bg-light rounded mb-3">
-                        <code id="sync-code" class="user-select-all">Loading...</code>
-                    </div>
-                    <p>Or enter a code to import data:</p>
-                    <div class="mb-3">
-                        <input type="text" class="form-control" id="import-code" placeholder="Paste sync code here">
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" id="import-btn">Import Data</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Floating Action Button -->
-    <button id="fab-add" class="fab" onclick="showTab('expense')">
-        <i class="bi bi-plus-lg"></i>
-    </button>
-
-    <!-- Sync Button -->
-    <button id="btn-sync" class="btn-sync" data-bs-toggle="modal" data-bs-target="#sync-modal">
-        <i class="bi bi-cloud-arrow-up"></i>
-    </button>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@4"></script>
     <script src="public/js/firebase-config.js"></script>
+    <script src="public/js/clerk-config.js"></script>
     <script src="public/js/app.js"></script>
 </body>
 </html> 
